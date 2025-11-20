@@ -8,6 +8,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.URL;
@@ -26,20 +27,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.MappingIterator;
+import com.fasterxml.jackson.databind.SequenceWriter;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import com.fasterxml.jackson.dataformat.csv.CsvParser;
 import com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import io.github.dataconnector.spi.DataSink;
 import io.github.dataconnector.spi.DataSource;
+import io.github.dataconnector.spi.DataStreamSink;
 import io.github.dataconnector.spi.DataStreamSource;
 import io.github.dataconnector.spi.model.ConnectorContext;
 import io.github.dataconnector.spi.model.ConnectorMetadata;
 import io.github.dataconnector.spi.model.ConnectorResult;
 import io.github.dataconnector.spi.stream.StreamCancellable;
 import io.github.dataconnector.spi.stream.StreamObserver;
+import io.github.dataconnector.spi.stream.StreamWriter;
 
-public class CsvConnector implements DataSource, DataSink, DataStreamSource {
+public class CsvConnector implements DataSource, DataSink, DataStreamSource, DataStreamSink {
 
     private static final Logger logger = LoggerFactory.getLogger(CsvConnector.class);
 
@@ -212,9 +216,6 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
     public ConnectorResult write(ConnectorContext context, List<Map<String, Object>> data) throws Exception {
         long startTime = System.currentTimeMillis();
 
-        String filePath = context.getConfiguration("file_path", String.class)
-                .orElseThrow(() -> new IllegalArgumentException("file_path is required"));
-
         if (data == null || data.isEmpty()) {
             return ConnectorResult.builder()
                     .success(false)
@@ -224,54 +225,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
                     .build();
         }
 
-        char delimiter = context.getConfiguration("delimiter", String.class).orElse(",").charAt(0);
-        char quoteChar = context.getConfiguration("quote_char", String.class).orElse("\"").charAt(0);
-        boolean withHeader = context.getConfiguration("use_first_row_as_header", Boolean.class).orElse(true);
-        boolean append = context.getConfiguration("append", Boolean.class).orElse(false);
-        String charsetName = context.getConfiguration("charset", String.class).orElse("UTF-8");
-
-        Charset charset;
-        try {
-            charset = Charset.forName(charsetName);
-        } catch (Exception e) {
-            throw new Exception("Invalid charset: " + charsetName);
-        }
-
-        CsvSchema.Builder schemaBuilder = CsvSchema.builder()
-                .setColumnSeparator(delimiter)
-                .setQuoteChar(quoteChar);
-
-        Set<String> headers = data.get(0).keySet();
-        for (String header : headers) {
-            schemaBuilder.addColumn(header);
-        }
-
-        if (withHeader) {
-            schemaBuilder.setUseHeader(true);
-        }
-
-        CsvSchema schema = schemaBuilder.build();
-
-        File file = new File(filePath);
-        if (file.getParentFile() != null && !file.getParentFile().exists()) {
-            if (!file.getParentFile().mkdirs()) {
-                throw new IOException("Failed to create parent directory: " + file.getParentFile().getAbsolutePath());
-            }
-        }
-
-        if (append && file.exists() && file.length() > 0 && withHeader) {
-            schema = schema.withoutHeader();
-        }
-
-        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file, append), charset)) {
-            csvMapper.writer(schema).writeValue(writer, data);
-
-            return ConnectorResult.builder()
-                    .success(true)
-                    .message("Successfully wrote " + data.size() + " records to CSV file")
-                    .recordsProcessed(data.size())
-                    .executionTimeMillis(System.currentTimeMillis() - startTime)
-                    .build();
+        try (StreamWriter writer = createWriter(context)) {
+            writer.writeBatch(data);
         } catch (Exception e) {
             logger.error("Error writing CSV file:", e);
             return ConnectorResult.builder()
@@ -279,6 +234,21 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
                     .message("Failed to write CSV file: " + e.getMessage())
                     .build();
         }
+
+        return ConnectorResult.builder()
+                .success(true)
+                .message("Successfully wrote " + data.size() + " records to CSV file")
+                .recordsProcessed(data.size())
+                .executionTimeMillis(System.currentTimeMillis() - startTime)
+                .build();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public StreamWriter createWriter(ConnectorContext context) throws IOException {
+        return new CsvStreamWriter(context);
     }
 
     /**
@@ -437,6 +407,107 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
             currentIndex++;
         }
         return filteredRecord;
+    }
+
+    private class CsvStreamWriter implements StreamWriter {
+        private final ConnectorContext context;
+        private SequenceWriter sequenceWriter;
+        private Writer outputWriter;
+        private boolean isClosed = false;
+
+        public CsvStreamWriter(ConnectorContext context) {
+            this.context = context;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (isClosed) {
+                return;
+            }
+            if (sequenceWriter != null) {
+                sequenceWriter.close();
+            } else if (outputWriter != null) {
+                outputWriter.close();
+            }
+        }
+
+        @Override
+        public void writeBatch(List<Map<String, Object>> records) throws IOException {
+            if (isClosed) {
+                throw new IOException("Stream writer is closed");
+            }
+            if (records == null || records.isEmpty()) {
+                return;
+            }
+
+            if (sequenceWriter == null) {
+                initializeWriter(records.get(0).keySet());
+            }
+
+            for (Map<String, Object> record : records) {
+                sequenceWriter.write(record);
+            }
+
+            sequenceWriter.flush();
+        }
+
+        private void initializeWriter(Set<String> headers) throws IOException {
+            String filePath = context.getConfiguration("file_path", String.class).orElse(null);
+            Object outputStreamObject = context.getConfiguration().get("output_stream");
+            char delimiter = context.getConfiguration("delimiter", String.class).orElse(",").charAt(0);
+            char quoteChar = context.getConfiguration("quote_char", String.class).orElse("\"").charAt(0);
+            boolean withHeader = context.getConfiguration("use_first_row_as_header", Boolean.class).orElse(true);
+            boolean append = context.getConfiguration("append", Boolean.class).orElse(false);
+            String charsetName = context.getConfiguration("charset", String.class).orElse("UTF-8");
+
+            Charset charset;
+            try {
+                charset = Charset.forName(charsetName);
+            } catch (Exception e) {
+                throw new IOException("Invalid charset: " + charsetName);
+            }
+
+            CsvSchema.Builder schemaBuilder = CsvSchema.builder()
+                    .setColumnSeparator(delimiter)
+                    .setQuoteChar(quoteChar);
+
+            for (String header : headers) {
+                schemaBuilder.addColumn(header);
+            }
+
+            boolean shouldWriteHeader = withHeader;
+            if (filePath != null && append) {
+                File file = new File(filePath);
+                if (file.exists() && file.length() > 0) {
+                    shouldWriteHeader = false;
+                }
+            }
+
+            if (shouldWriteHeader) {
+                schemaBuilder.setUseHeader(true);
+            } else {
+                //
+            }
+
+            CsvSchema schema = schemaBuilder.build();
+
+            if (outputStreamObject instanceof OutputStream) {
+                this.outputWriter = new OutputStreamWriter((OutputStream) outputStreamObject, charset);
+            } else if (filePath != null) {
+                File file = new File(filePath);
+                if (file.getParentFile() != null && !file.getParentFile().exists()) {
+                    if (!file.getParentFile().mkdirs()) {
+                        throw new IOException(
+                                "Failed to create parent directory: " + file.getParentFile().getAbsolutePath());
+                    }
+                }
+                this.outputWriter = new OutputStreamWriter(new FileOutputStream(file, append), charset);
+            } else {
+                throw new IOException("Target not found: either output_stream or file_path must be provided");
+            }
+
+            this.sequenceWriter = csvMapper.writer(schema).writeValues(outputWriter);
+        }
     }
 
 }

@@ -12,6 +12,7 @@ It plugs into the shared `connector-spi` module and can be discovered through Ja
 - Rich diagnostics: descriptive success/failure `ConnectorResult` responses and SLF4J-based logging.
 - Supports streaming reads via the `DataStreamSource` SPI, enabling row-by-row processing with cancellation.
 - Implements the `write` operation for CSV exports, including optional header control and append mode.
+- Provides streaming CSV writes through the `DataStreamSink` SPI (`StreamWriter`).
 
 ## Requirements
 
@@ -114,12 +115,31 @@ ConnectorResult result = connector.write(context, List.of(
 ));
 ```
 
+### Streaming writes
+
+```java
+CsvConnector connector = new CsvConnector();
+ConnectorContext context = ConnectorContext.builder()
+    .configuration(Map.of(
+        "file_path", "/data/out/customers.csv",
+        "append", true,
+        "use_first_row_as_header", false
+    ))
+    .build();
+
+try (StreamWriter writer = connector.createWriter(context)) {
+    writer.writeBatch(List.of(Map.of("id", 3, "name", "Carol")));
+    writer.writeBatch(List.of(Map.of("id", 4, "name", "Dave")));
+}
+```
+
 ## Configuration Options
 
 | Key                        | Type      | Default | Description |
 |----------------------------|-----------|---------|-------------|
-| `file_path`                | `String`  | —       | Path to local file or classpath resource name. Optional if `input_data` is supplied. |
+| `file_path`                | `String`  | —       | Path to local file or classpath resource name. Optional if `input_data` (read) or `output_stream` (write) is supplied. |
 | `input_data`               | `String` / `byte[]` | — | Raw CSV payload provided directly. |
+| `output_stream`            | `OutputStream` | — | When writing, target stream to emit CSV bytes to (takes precedence over `file_path`). |
 | `delimiter`                | `String` (1 char) | `,` | Column separator. |
 | `quote_char`               | `String` (1 char) | `"` | Quote character. |
 | `use_first_row_as_header`  | `Boolean` | `true`  | Treat the first row as headers. |
@@ -131,7 +151,7 @@ ConnectorResult result = connector.write(context, List.of(
 | `charset`                  | `String`  | `UTF-8` | Charset name used when decoding strings/streams. |
 | `append`                   | `Boolean` | `false` | When `true`, appends to existing files; otherwise overwrites (headers are emitted only when creating a new file). |
 
-At least one of `file_path` or `input_data` must be set; otherwise `validateConfiguration` and `read` return an error.
+For reads, set either `file_path` or `input_data`. For writes, set `file_path` or provide an `output_stream`.
 
 ## Testing & Validation
 
