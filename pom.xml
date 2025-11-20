@@ -18,6 +18,34 @@
 
     <name>Connector CSV</name>
     <description>CSV Connector Implementation for Universal Data Connectors</description>
+    <url>https://github.com/dataconnector/connector-csv</url>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/dataconnector/connector-csv/issues</url>
+    </issueManagement>
+
+    <scm>
+        <connection>scm:git:git://github.com/dataconnector/connector-csv.git</connection>
+        <developerConnection>scm:git:ssh://github.com/dataconnector/connector-csv.git</developerConnection>
+        <url>https://github.com/dataconnector/connector-csv</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <developers>
+        <developer>
+            <id>haiphamcoder</id>
+            <name>Hai Pham Ngoc</name>
+            <email>ngochai285nd@gmail.com</email>
+        </developer>
+    </developers>
+
+    <licenses>
+        <license>
+            <name>Apache License 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+        </license>
+    </licenses>
 
     <dependencies>
         <dependency>
