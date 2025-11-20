@@ -7,8 +7,9 @@ It plugs into the shared `connector-spi` module and can be discovered through Ja
 ## Features
 
 - Reads CSV content from the filesystem, classpath resources, or in-memory strings/byte arrays supplied via the connector context.
-- Flexible parsing controls: custom delimiter/quote characters, optional header detection, trimming, comment skipping, selective row starts, charset control, and optional skipping of empty lines.
+- Flexible parsing controls: custom delimiter/quote characters, optional header detection, trimming, comment skipping, selective row starts, charset control, record limits, and optional skipping of empty lines.
 - Rich diagnostics: descriptive success/failure `ConnectorResult` responses and SLF4J-based logging.
+- Supports streaming reads via the `DataStreamSource` SPI, enabling row-by-row processing with cancellation.
 - `write` operation is intentionally left unimplemented for now (throws `UnsupportedOperationException`).
 
 ## Requirements
@@ -29,7 +30,7 @@ The resulting artifact is `target/connector-csv-0.0.1.jar`.
 
 1. Add the connector JAR (and its dependencies) to your runtime classpath.
 2. Ensure the SPI service file remains on the classpath so the connector is discoverable.
-3. Build a `ConnectorContext` with the desired configuration map, then call `read(context)` on the connector instance (manually or via the SPI facade).
+3. Build a `ConnectorContext` with the desired configuration map, then call `read(context)` (batch) or `startStream(context, observer)` (streaming) on the connector instance (manually or via the SPI facade).
 
 ### Minimal example
 
@@ -65,6 +66,33 @@ ConnectorContext context = ConnectorContext.builder()
 ConnectorResult result = connector.read(context);
 ```
 
+### Streaming rows
+
+```java
+CsvConnector connector = new CsvConnector();
+ConnectorContext context = ...; // same as batch
+
+StreamObserver observer = new StreamObserver() {
+    @Override
+    public void onNext(Map<String, Object> row) {
+        // process row-by-row
+    }
+    @Override
+    public void onError(Throwable error) {
+        error.printStackTrace();
+    }
+    @Override
+    public void onComplete() {
+        System.out.println("Stream finished");
+    }
+};
+
+StreamCancellable cancellable = connector.startStream(context, observer);
+
+// Later if you need to stop reading early:
+cancellable.cancel();
+```
+
 ## Configuration Options
 
 | Key                        | Type      | Default | Description |
@@ -76,7 +104,8 @@ ConnectorResult result = connector.read(context);
 | `use_first_row_as_header`  | `Boolean` | `true`  | Treat the first row as headers. |
 | `skip_empty_rows`          | `Boolean` | `true`  | Skip blank lines. |
 | `trim_spaces`              | `Boolean` | `false` | Trim surrounding spaces of values. |
-| `start_row`                | `Integer` | `0`     | Number of rows to skip before parsing. |
+| `start_row`                | `Integer` | `0`     | Number of rows to skip before parsing/streaming. |
+| `limit`                    | `Integer` | `-1`    | Maximum number of rows to read (`-1` means no limit). |
 | `charset`                  | `String`  | `UTF-8` | Charset name used when decoding strings/streams. |
 
 At least one of `file_path` or `input_data` must be set; otherwise `validateConfiguration` and `read` return an error.

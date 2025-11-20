@@ -23,7 +23,7 @@
         <dependency>
             <groupId>io.github.dataconnector</groupId>
             <artifactId>connector-spi</artifactId>
-            <version>0.0.1</version>
+            <version>0.0.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
