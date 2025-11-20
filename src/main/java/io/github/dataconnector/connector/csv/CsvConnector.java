@@ -4,9 +4,12 @@ import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -207,8 +210,75 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
      */
     @Override
     public ConnectorResult write(ConnectorContext context, List<Map<String, Object>> data) throws Exception {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'write'");
+        long startTime = System.currentTimeMillis();
+
+        String filePath = context.getConfiguration("file_path", String.class)
+                .orElseThrow(() -> new IllegalArgumentException("file_path is required"));
+
+        if (data == null || data.isEmpty()) {
+            return ConnectorResult.builder()
+                    .success(false)
+                    .message("No data to write")
+                    .recordsProcessed(0)
+                    .executionTimeMillis(System.currentTimeMillis() - startTime)
+                    .build();
+        }
+
+        char delimiter = context.getConfiguration("delimiter", String.class).orElse(",").charAt(0);
+        char quoteChar = context.getConfiguration("quote_char", String.class).orElse("\"").charAt(0);
+        boolean withHeader = context.getConfiguration("use_first_row_as_header", Boolean.class).orElse(true);
+        boolean append = context.getConfiguration("append", Boolean.class).orElse(false);
+        String charsetName = context.getConfiguration("charset", String.class).orElse("UTF-8");
+
+        Charset charset;
+        try {
+            charset = Charset.forName(charsetName);
+        } catch (Exception e) {
+            throw new Exception("Invalid charset: " + charsetName);
+        }
+
+        CsvSchema.Builder schemaBuilder = CsvSchema.builder()
+                .setColumnSeparator(delimiter)
+                .setQuoteChar(quoteChar);
+
+        Set<String> headers = data.get(0).keySet();
+        for (String header : headers) {
+            schemaBuilder.addColumn(header);
+        }
+
+        if (withHeader) {
+            schemaBuilder.setUseHeader(true);
+        }
+
+        CsvSchema schema = schemaBuilder.build();
+
+        File file = new File(filePath);
+        if (file.getParentFile() != null && !file.getParentFile().exists()) {
+            if (!file.getParentFile().mkdirs()) {
+                throw new IOException("Failed to create parent directory: " + file.getParentFile().getAbsolutePath());
+            }
+        }
+
+        if (append && file.exists() && file.length() > 0 && withHeader) {
+            schema = schema.withoutHeader();
+        }
+
+        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file, append), charset)) {
+            csvMapper.writer(schema).writeValue(writer, data);
+
+            return ConnectorResult.builder()
+                    .success(true)
+                    .message("Successfully wrote " + data.size() + " records to CSV file")
+                    .recordsProcessed(data.size())
+                    .executionTimeMillis(System.currentTimeMillis() - startTime)
+                    .build();
+        } catch (Exception e) {
+            logger.error("Error writing CSV file:", e);
+            return ConnectorResult.builder()
+                    .success(false)
+                    .message("Failed to write CSV file: " + e.getMessage())
+                    .build();
+        }
     }
 
     /**
@@ -346,6 +416,13 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
         return indices.isEmpty() ? null : indices;
     }
 
+    /**
+     * Filters a record to only include the specified columns.
+     * 
+     * @param rawRecord       The raw record to filter.
+     * @param includedColumns The columns to include.
+     * @return The filtered record.
+     */
     private Map<String, Object> filterRecord(Map<String, Object> rawRecord, Set<Integer> includedColumns) {
         if (includedColumns == null || rawRecord == null || rawRecord.isEmpty()) {
             return rawRecord;
