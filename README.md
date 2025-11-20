@@ -8,6 +8,7 @@ It plugs into the shared `connector-spi` module and can be discovered through Ja
 
 - Reads CSV content from the filesystem, classpath resources, or in-memory strings/byte arrays supplied via the connector context.
 - Flexible parsing controls: custom delimiter/quote characters, optional header detection, trimming, comment skipping, selective row starts, charset control, record limits, and optional skipping of empty lines.
+- Optional column projection (`columns` setting) lets you read only the indices you care about (single indexes or ranges such as `0-3,5`).
 - Rich diagnostics: descriptive success/failure `ConnectorResult` responses and SLF4J-based logging.
 - Supports streaming reads via the `DataStreamSource` SPI, enabling row-by-row processing with cancellation.
 - `write` operation is intentionally left unimplemented for now (throws `UnsupportedOperationException`).
@@ -60,6 +61,7 @@ String csv = "id,name\n1,Alice\n2,Bob\n";
 ConnectorContext context = ConnectorContext.builder()
     .configuration(Map.of(
         "input_data", csv,
+        "columns", "0-1", // keep only the first two columns
         "skip_empty_rows", true
     ))
     .build();
@@ -106,6 +108,7 @@ cancellable.cancel();
 | `trim_spaces`              | `Boolean` | `false` | Trim surrounding spaces of values. |
 | `start_row`                | `Integer` | `0`     | Number of rows to skip before parsing/streaming. |
 | `limit`                    | `Integer` | `-1`    | Maximum number of rows to read (`-1` means no limit). |
+| `columns`                  | `String` / `List<Integer>` | `null` | Optional projection list. Accepts comma-separated indexes or ranges (e.g. `0,2,4-6`). |
 | `charset`                  | `String`  | `UTF-8` | Charset name used when decoding strings/streams. |
 
 At least one of `file_path` or `input_data` must be set; otherwise `validateConfiguration` and `read` return an error.

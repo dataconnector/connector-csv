@@ -10,8 +10,11 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -86,6 +89,9 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
         int startRow = context.getConfiguration("start_row", Integer.class).orElse(0);
         int limit = context.getConfiguration("limit", Integer.class).orElse(-1);
 
+        // Parse the included columns configuration
+        Set<Integer> includedColumns = parseIncludedColumns(context);
+
         // Create the reader for the CSV file and skip the initial rows
         BufferedReader reader = createReader(context);
         for (int i = 0; i < startRow; i++) {
@@ -108,7 +114,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
                 if (limit != -1 && records.size() >= limit) {
                     break;
                 }
-                records.add(iterator.next());
+                Map<String, Object> rawRecord = iterator.next();
+                records.add(filterRecord(rawRecord, includedColumns));
             }
 
             return ConnectorResult.builder()
@@ -138,6 +145,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
     public StreamCancellable startStream(ConnectorContext context, StreamObserver observer) throws Exception {
         AtomicBoolean running = new AtomicBoolean(true);
 
+        Set<Integer> includedColumns = parseIncludedColumns(context);
+
         // Submit the stream reader task to the executor
         executor.submit(() -> {
             BufferedReader reader = null;
@@ -165,8 +174,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
                         .with(schema)
                         .readValues(reader);
                 while (iterator.hasNext() && running.get()) {
-                    Map<String, Object> record = iterator.next();
-                    observer.onNext(record);
+                    Map<String, Object> rawRecord = iterator.next();
+                    observer.onNext(filterRecord(rawRecord, includedColumns));
                 }
 
                 logger.info("CSV stream reader thread completed");
@@ -206,7 +215,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
      * Creates a CSV schema based on the connector context configuration.
      * 
      * @param context The connector context containing configuration settings.
-     * @return A {@link CsvSchema} object configured according to the context settings.
+     * @return A {@link CsvSchema} object configured according to the context
+     *         settings.
      */
     private CsvSchema createSchema(ConnectorContext context) {
         char delimiter = context.getConfiguration("delimiter", String.class).orElse(",").charAt(0);
@@ -288,6 +298,68 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource {
 
         return new BufferedReader(new InputStreamReader(inputStream, charset));
 
+    }
+
+    /**
+     * Parses the included columns configuration from the connector context.
+     * 
+     * @param context The connector context containing configuration settings.
+     * @return A set of column indices to include, or null if all columns should
+     *         be read.
+     */
+    private Set<Integer> parseIncludedColumns(ConnectorContext context) {
+        Object columnsConfig = context.getConfiguration().get("columns");
+        if (columnsConfig == null) {
+            return null;
+        }
+
+        Set<Integer> indices = new HashSet<>();
+        try {
+            if (columnsConfig instanceof String) {
+                String[] parts = ((String) columnsConfig).split(",");
+                for (String part : parts) {
+                    part = part.trim();
+                    if (part.contains("-")) {
+                        String[] range = part.split("-");
+                        if (range.length != 2) {
+                            throw new IllegalArgumentException("Invalid column range: " + part);
+                        }
+                        int start = Integer.parseInt(range[0].trim());
+                        int end = Integer.parseInt(range[1].trim());
+                        for (int i = start; i <= end; i++) {
+                            indices.add(i);
+                        }
+                    } else {
+                        int index = Integer.parseInt(part.trim());
+                        indices.add(index);
+                    }
+                }
+            } else if (columnsConfig instanceof List) {
+                for (Object item : (List<?>) columnsConfig) {
+                    indices.add(Integer.parseInt(item.toString()));
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to parse 'columns' configuration. Reading all columns.", e);
+            return null;
+        }
+        return indices.isEmpty() ? null : indices;
+    }
+
+    private Map<String, Object> filterRecord(Map<String, Object> rawRecord, Set<Integer> includedColumns) {
+        if (includedColumns == null || rawRecord == null || rawRecord.isEmpty()) {
+            return rawRecord;
+        }
+
+        Map<String, Object> filteredRecord = new LinkedHashMap<>();
+        int currentIndex = 0;
+        for (Map.Entry<String, Object> entry : rawRecord.entrySet()) {
+            if (includedColumns.contains(currentIndex)) {
+                filteredRecord.put(entry.getKey(), entry.getValue());
+            }
+            currentIndex++;
+        }
+        return filteredRecord;
     }
 
 }
