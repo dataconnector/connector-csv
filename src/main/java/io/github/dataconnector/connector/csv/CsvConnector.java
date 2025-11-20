@@ -1,7 +1,6 @@
 package io.github.dataconnector.connector.csv;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -79,8 +78,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource, Dat
         List<String> errors = new ArrayList<>();
         Map<String, Object> configuration = context.getConfiguration();
         if (configuration == null
-                || (!configuration.containsKey("file_path") && !configuration.containsKey("input_data"))) {
-            errors.add("Missing source: either 'file_path' or 'input_data' is required");
+                || (!configuration.containsKey("file_path") && !configuration.containsKey("input_stream"))) {
+            errors.add("Missing source: either 'file_path' or 'input_stream' is required");
         }
         return errors;
     }
@@ -304,7 +303,7 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource, Dat
      */
     private BufferedReader createReader(ConnectorContext context) throws Exception {
         String filePath = context.getConfiguration("file_path", String.class).orElse(null);
-        Object inputData = context.getConfiguration().get("input_data");
+        Object inputStreamObject = context.getConfiguration().get("input_stream");
         String charsetName = context.getConfiguration("charset", String.class).orElse("UTF-8");
 
         Charset charset;
@@ -315,10 +314,8 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource, Dat
         }
 
         InputStream inputStream;
-        if (inputData instanceof byte[]) {
-            inputStream = new ByteArrayInputStream((byte[]) inputData);
-        } else if (inputData instanceof String) {
-            inputStream = new ByteArrayInputStream(((String) inputData).getBytes(charset));
+        if (inputStreamObject instanceof InputStream) {
+            inputStream = (InputStream) inputStreamObject;
         } else if (filePath != null && !filePath.isBlank()) {
             File file = new File(filePath);
             if (!file.exists()) {

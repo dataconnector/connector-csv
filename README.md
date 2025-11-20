@@ -6,7 +6,7 @@ It plugs into the shared `connector-spi` module and can be discovered through Ja
 
 ## Features
 
-- Reads CSV content from the filesystem, classpath resources, or in-memory strings/byte arrays supplied via the connector context.
+- Reads CSV content from the filesystem, classpath resources, or caller-provided streams supplied via the connector context.
 - Flexible parsing controls: custom delimiter/quote characters, optional header detection, trimming, comment skipping, selective row starts, charset control, record limits, and optional skipping of empty lines.
 - Optional column projection (`columns` setting) lets you read only the indices you care about (single indexes or ranges such as `0-3,5`).
 - Rich diagnostics: descriptive success/failure `ConnectorResult` responses and SLF4J-based logging.
@@ -137,8 +137,8 @@ try (StreamWriter writer = connector.createWriter(context)) {
 
 | Key                        | Type      | Default | Description |
 |----------------------------|-----------|---------|-------------|
-| `file_path`                | `String`  | —       | Path to local file or classpath resource name. Optional if `input_data` (read) or `output_stream` (write) is supplied. |
-| `input_data`               | `String` / `byte[]` | — | Raw CSV payload provided directly. |
+| `file_path`                | `String`  | —       | Path to local file or classpath resource name. Optional if `input_stream` (read) or `output_stream` (write) is supplied. |
+| `input_stream`             | `InputStream` | — | Raw CSV payload provided directly for reads (takes precedence over `file_path`). |
 | `output_stream`            | `OutputStream` | — | When writing, target stream to emit CSV bytes to (takes precedence over `file_path`). |
 | `delimiter`                | `String` (1 char) | `,` | Column separator. |
 | `quote_char`               | `String` (1 char) | `"` | Quote character. |
@@ -151,7 +151,7 @@ try (StreamWriter writer = connector.createWriter(context)) {
 | `charset`                  | `String`  | `UTF-8` | Charset name used when decoding strings/streams. |
 | `append`                   | `Boolean` | `false` | When `true`, appends to existing files; otherwise overwrites (headers are emitted only when creating a new file). |
 
-For reads, set either `file_path` or `input_data`. For writes, set `file_path` or provide an `output_stream`.
+For reads, set either `file_path` or `input_stream`. For writes, set `file_path` or provide an `output_stream`.
 
 ## Testing & Validation
 
