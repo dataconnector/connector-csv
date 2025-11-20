@@ -2,10 +2,14 @@ package io.github.dataconnector.connector.csv;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
@@ -18,6 +22,8 @@ import io.github.dataconnector.spi.model.ConnectorMetadata;
 import io.github.dataconnector.spi.model.ConnectorResult;
 
 public class CsvConnector implements DataSource, DataSink {
+
+    private static final Logger logger = LoggerFactory.getLogger(CsvConnector.class);
 
     private final CsvMapper csvMapper = new CsvMapper();
 
@@ -81,9 +87,22 @@ public class CsvConnector implements DataSource, DataSink {
         } else if (inputData instanceof String) {
             iterator = csvMapper.readerFor(Map.class).with(schema)
                     .readValues(((String) inputData).getBytes(StandardCharsets.UTF_8));
-        } else if (filePath != null) {
+        } else if (!filePath.isBlank()) {
+            File file = new File(filePath);
+            if (!file.exists()) {
+                URL url = getClass().getClassLoader().getResource(filePath);
+                if (url != null) {
+                    file = new File(url.getFile());
+                    logger.info("Loading CSV file from URL: {}", file.getAbsolutePath());
+                } else {
+                    return ConnectorResult.builder()
+                            .success(false)
+                            .message("File not found: " + filePath)
+                            .build();
+                }
+            }
             iterator = csvMapper.readerFor(Map.class).with(schema)
-                    .readValues(new File(filePath));
+                    .readValues(file);
         } else {
             return ConnectorResult.builder()
                     .success(false)
