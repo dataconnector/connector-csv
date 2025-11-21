@@ -58,10 +58,13 @@ if (result.isSuccess()) {
 ### In-memory data
 
 ```java
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+
 String csv = "id,name\n1,Alice\n2,Bob\n";
 ConnectorContext context = ConnectorContext.builder()
     .configuration(Map.of(
-        "input_data", csv,
+        "input_stream", new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)),
         "columns", "0-1", // keep only the first two columns
         "skip_empty_rows", true
     ))
@@ -73,7 +76,13 @@ ConnectorResult result = connector.read(context);
 
 ```java
 CsvConnector connector = new CsvConnector();
-ConnectorContext context = ...; // same as batch
+ConnectorContext context = ConnectorContext.builder()
+    .configuration(Map.of(
+        "file_path", "/data/customers.csv",
+        "limit", 100, // limit to first 100 records
+        "use_first_row_as_header", true
+    ))
+    .build();
 
 StreamObserver observer = new StreamObserver() {
     @Override
@@ -131,6 +140,29 @@ try (StreamWriter writer = connector.createWriter(context)) {
     writer.writeBatch(List.of(Map.of("id", 3, "name", "Carol")));
     writer.writeBatch(List.of(Map.of("id", 4, "name", "Dave")));
 }
+```
+
+### Writing to output stream
+
+```java
+import java.io.ByteArrayOutputStream;
+
+CsvConnector connector = new CsvConnector();
+ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+ConnectorContext context = ConnectorContext.builder()
+    .configuration(Map.of(
+        "output_stream", outputStream,
+        "use_first_row_as_header", true
+    ))
+    .build();
+
+ConnectorResult result = connector.write(context, List.of(
+    Map.of("id", 1, "name", "Alice"),
+    Map.of("id", 2, "name", "Bob")
+));
+
+// Access the CSV bytes
+byte[] csvBytes = outputStream.toByteArray();
 ```
 
 ## Configuration Options
