@@ -152,6 +152,7 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource, Dat
         AtomicBoolean running = new AtomicBoolean(true);
 
         Set<Integer> includedColumns = parseIncludedColumns(context);
+        int limit = context.getConfiguration("limit", Integer.class).orElse(-1);
 
         // Submit the stream reader task to the executor
         executor.submit(() -> {
@@ -179,12 +180,18 @@ public class CsvConnector implements DataSource, DataSink, DataStreamSource, Dat
                 MappingIterator<Map<String, Object>> iterator = csvMapper.readerFor(Map.class)
                         .with(schema)
                         .readValues(reader);
+
+                int recordsProcessed = 0;
                 while (iterator.hasNext() && running.get()) {
+                    if (limit != -1 && recordsProcessed >= limit) {
+                        break;
+                    }
                     Map<String, Object> rawRecord = iterator.next();
                     observer.onNext(filterRecord(rawRecord, includedColumns));
+                    recordsProcessed++;
                 }
 
-                logger.info("CSV stream reader thread completed");
+                logger.info("CSV stream reader thread completed with {} records processed", recordsProcessed);
                 observer.onComplete();
             } catch (Exception e) {
                 logger.error("Error in CSV stream reader thread:", e);
